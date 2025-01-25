@@ -1,0 +1,122 @@
+#!/bin/bash
+
+# Define history files
+BASH_HISTORY="$HOME/.bash_history"
+ZSH_HISTORY="$HOME/.zsh_history"
+PYTHON_HISTORY="$HOME/.python_history"
+RC_LOCAL="/etc/rc.local"
+
+# Function to redirect history files to /dev/null
+redirect_history_files() {
+    echo "Redirecting history files to /dev/null..."
+    
+    # Redirect .bash_history
+    if ! grep -q "export HISTFILE=/dev/null" "$HOME/.bashrc"; then
+        echo 'export HISTFILE=/dev/null' >> "$HOME/.bashrc"
+        echo ".bash_history redirected."
+    fi
+
+    # Redirect .zsh_history
+    if ! grep -q "export HISTFILE=/dev/null" "$HOME/.zshrc"; then
+        echo 'export HISTFILE=/dev/null' >> "$HOME/.zshrc"
+        echo ".zsh_history redirected."
+    fi
+
+    # Redirect .python_history
+    if [ ! -f "$HOME/.pythonrc" ]; then
+        echo 'import os' > "$HOME/.pythonrc"
+        echo 'os.environ["PYTHONHISTFILE"] = "/dev/null"' >> "$HOME/.pythonrc"
+        echo ".python_history redirected."
+    elif ! grep -q 'os.environ["PYTHONHISTFILE"] = "/dev/null"' "$HOME/.pythonrc"; then
+        echo 'import os' >> "$HOME/.pythonrc"
+        echo 'os.environ["PYTHONHISTFILE"] = "/dev/null"' >> "$HOME/.pythonrc"
+        echo ".python_history redirected."
+    fi
+}
+
+# Function to create a crontab job to clear history daily at 12 AM
+setup_cron_job() {
+    echo "Setting up a cron job to clear history daily at 12 AM..."
+    (crontab -l 2>/dev/null; echo "0 0 * * * > $BASH_HISTORY && > $ZSH_HISTORY && > $PYTHON_HISTORY") | crontab -
+    echo "Cron job added."
+}
+
+# Function to ensure history files are cleared on system startup
+setup_rc_local() {
+    echo "Setting up /etc/rc.local for startup history clearing..."
+    
+    # Check if /etc/rc.local exists, create if necessary
+    if [ ! -f "$RC_LOCAL" ]; then
+        sudo bash -c "echo '#!/bin/bash' > $RC_LOCAL"
+        sudo bash -c "echo 'exit 0' >> $RC_LOCAL"
+        sudo chmod +x "$RC_LOCAL"
+    fi
+
+    # Add commands to /etc/rc.local
+    if ! grep -q "> $BASH_HISTORY" "$RC_LOCAL"; then
+        sudo sed -i "/^exit 0/i > $BASH_HISTORY\n> $ZSH_HISTORY\n> $PYTHON_HISTORY" "$RC_LOCAL"
+        echo "Commands added to /etc/rc.local."
+    else
+        echo "Commands already exist in /etc/rc.local."
+    fi
+}
+
+# Function to make history files immutable (optional, can be toggled)
+make_files_immutable() {
+    echo "Making history files immutable..."
+    > "$BASH_HISTORY"
+    > "$ZSH_HISTORY"
+    > "$PYTHON_HISTORY"
+    sudo chattr +i "$BASH_HISTORY" "$ZSH_HISTORY" "$PYTHON_HISTORY"
+    echo "History files are now immutable."
+}
+
+# Function to make history files mutable (optional)
+make_files_mutable() {
+    echo "Making history files mutable..."
+    sudo chattr -i "$BASH_HISTORY" "$ZSH_HISTORY" "$PYTHON_HISTORY"
+    echo "History files are now mutable."
+}
+
+# Main menu
+echo "Choose an option:"
+echo "1. Redirect history files to /dev/null"
+echo "2. Set up daily cron job to clear history"
+echo "3. Clear history on system startup (via /etc/rc.local)"
+echo "4. Make history files immutable"
+echo "5. Make history files mutable"
+echo "6. Perform all actions"
+echo "7. Exit"
+read -p "Enter your choice: " CHOICE
+
+case $CHOICE in
+    1)
+        redirect_history_files
+        ;;
+    2)
+        setup_cron_job
+        ;;
+    3)
+        setup_rc_local
+        ;;
+    4)
+        make_files_immutable
+        ;;
+    5)
+        make_files_mutable
+        ;;
+    6)
+        redirect_history_files
+        setup_cron_job
+        setup_rc_local
+        make_files_immutable
+        ;;
+    7)
+        echo "Exiting..."
+        exit 0
+        ;;
+    *)
+        echo "Invalid choice. Exiting."
+        exit 1
+        ;;
+esac
