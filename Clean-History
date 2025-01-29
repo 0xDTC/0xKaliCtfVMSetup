@@ -5,63 +5,64 @@ BASH_HISTORY="$HOME/.bash_history"
 ZSH_HISTORY="$HOME/.zsh_history"
 PYTHON_HISTORY="$HOME/.python_history"
 RC_LOCAL="/etc/rc.local"
+PYTHONRC="$HOME/.pythonrc"
+CRON_JOB="0 0 * * * > $BASH_HISTORY && > $ZSH_HISTORY && > $PYTHON_HISTORY"
 
-# Function to redirect history files to /dev/null
+# ------------------------------
+# INDIVIDUAL ACTION FUNCTIONS
+# ------------------------------
+
+# 1) Redirect history files to /dev/null
 redirect_history_files() {
     echo "Redirecting history files to /dev/null..."
-    
-    # Redirect .bash_history
-    if ! grep -q "export HISTFILE=/dev/null" "$HOME/.bashrc"; then
-        echo 'export HISTFILE=/dev/null' >> "$HOME/.bashrc"
-        echo ".bash_history redirected."
+
+    # Remove existing references to HISTFILE=/dev/null, then add fresh lines
+    sed -i '/export HISTFILE=\/dev\/null/d' "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null
+
+    # .bashrc
+    echo 'export HISTFILE=/dev/null' >> "$HOME/.bashrc"
+    # .zshrc
+    echo 'export HISTFILE=/dev/null' >> "$HOME/.zshrc"
+
+    # Python history redirection
+    if [ ! -f "$PYTHONRC" ]; then
+        echo 'import os' > "$PYTHONRC"
+        echo 'os.environ["PYTHONHISTFILE"] = "/dev/null"' >> "$PYTHONRC"
+    elif ! grep -q 'os.environ["PYTHONHISTFILE"] = "/dev/null"' "$PYTHONRC"; then
+        echo 'import os' >> "$PYTHONRC"
+        echo 'os.environ["PYTHONHISTFILE"] = "/dev/null"' >> "$PYTHONRC"
     fi
 
-    # Redirect .zsh_history
-    if ! grep -q "export HISTFILE=/dev/null" "$HOME/.zshrc"; then
-        echo 'export HISTFILE=/dev/null' >> "$HOME/.zshrc"
-        echo ".zsh_history redirected."
-    fi
-
-    # Redirect .python_history
-    if [ ! -f "$HOME/.pythonrc" ]; then
-        echo 'import os' > "$HOME/.pythonrc"
-        echo 'os.environ["PYTHONHISTFILE"] = "/dev/null"' >> "$HOME/.pythonrc"
-        echo ".python_history redirected."
-    elif ! grep -q 'os.environ["PYTHONHISTFILE"] = "/dev/null"' "$HOME/.pythonrc"; then
-        echo 'import os' >> "$HOME/.pythonrc"
-        echo 'os.environ["PYTHONHISTFILE"] = "/dev/null"' >> "$HOME/.pythonrc"
-        echo ".python_history redirected."
-    fi
+    echo "History files are now redirected to /dev/null."
 }
 
-# Function to create a crontab job to clear history daily at 12 AM
+# 2) Set up daily cron job to clear history at 12 AM
 setup_cron_job() {
     echo "Setting up a cron job to clear history daily at 12 AM..."
-    (crontab -l 2>/dev/null; echo "0 0 * * * > $BASH_HISTORY && > $ZSH_HISTORY && > $PYTHON_HISTORY") | crontab -
+    (crontab -l 2>/dev/null | grep -v "$CRON_JOB"; echo "$CRON_JOB") | crontab -
     echo "Cron job added."
 }
 
-# Function to ensure history files are cleared on system startup
+# 3) Clear history on system startup
 setup_rc_local() {
     echo "Setting up /etc/rc.local for startup history clearing..."
-    
-    # Check if /etc/rc.local exists, create if necessary
+
+    # Create /etc/rc.local if missing
     if [ ! -f "$RC_LOCAL" ]; then
         sudo bash -c "echo '#!/bin/bash' > $RC_LOCAL"
         sudo bash -c "echo 'exit 0' >> $RC_LOCAL"
         sudo chmod +x "$RC_LOCAL"
     fi
 
-    # Add commands to /etc/rc.local
+    # Insert commands before 'exit 0' if not already present
     if ! grep -q "> $BASH_HISTORY" "$RC_LOCAL"; then
         sudo sed -i "/^exit 0/i > $BASH_HISTORY\n> $ZSH_HISTORY\n> $PYTHON_HISTORY" "$RC_LOCAL"
-        echo "Commands added to /etc/rc.local."
-    else
-        echo "Commands already exist in /etc/rc.local."
     fi
+
+    echo "Startup clearing set up."
 }
 
-# Function to make history files immutable (optional, can be toggled)
+# 4) Make history files immutable
 make_files_immutable() {
     echo "Making history files immutable..."
     > "$BASH_HISTORY"
@@ -71,47 +72,108 @@ make_files_immutable() {
     echo "History files are now immutable."
 }
 
-# Function to make history files mutable (optional)
-make_files_mutable() {
-    echo "Making history files mutable..."
-    sudo chattr -i "$BASH_HISTORY" "$ZSH_HISTORY" "$PYTHON_HISTORY"
-    echo "History files are now mutable."
+# ------------------------------
+# ROLLBACK FUNCTIONS
+# ------------------------------
+
+# 5) Restore history file logging
+restore_history_files() {
+    echo "Restoring history file logging..."
+
+    # Remove references to HISTFILE=/dev/null
+    sed -i '/export HISTFILE=\/dev\/null/d' "$HOME/.bashrc" "$HOME/.zshrc" 2>/dev/null
+
+    # Remove Python history redirection
+    if [ -f "$PYTHONRC" ]; then
+        sed -i '/os.environ\["PYTHONHISTFILE"\] = "\/dev\/null"/d' "$PYTHONRC"
+    fi
+
+    echo "History logging restored."
 }
 
-# Main menu
+# 6) Remove daily cron job
+remove_cron_job() {
+    echo "Removing daily cron job..."
+    crontab -l 2>/dev/null | grep -v "$CRON_JOB" | crontab -
+    echo "Cron job removed."
+}
+
+# 7) Remove history clearing from /etc/rc.local
+remove_rc_local() {
+    echo "Removing startup history clearing..."
+
+    if [ -f "$RC_LOCAL" ]; then
+        # Use sed with a '|' delimiter to handle special chars like '>'
+        sudo sed -i '\|> '"$BASH_HISTORY"'|d' "$RC_LOCAL"
+        sudo sed -i '\|> '"$ZSH_HISTORY"'|d' "$RC_LOCAL"
+        sudo sed -i '\|> '"$PYTHON_HISTORY"'|d' "$RC_LOCAL"
+    fi
+
+    echo "Startup clearing removed."
+}
+
+# 8) Make history files writable again
+make_files_mutable() {
+    echo "Making history files writable..."
+    sudo chattr -i "$BASH_HISTORY" "$ZSH_HISTORY" "$PYTHON_HISTORY"
+    echo "History files are now writable."
+}
+
+# ------------------------------
+# GLOBAL ACTIONS
+# ------------------------------
+
+# 9) Enable all privacy settings
+enable_privacy() {
+    echo "Enabling all privacy settings..."
+    redirect_history_files
+    setup_cron_job
+    setup_rc_local
+    make_files_immutable
+    echo "All privacy settings enabled."
+}
+
+# 10) Rollback all settings to default
+rollback_to_default() {
+    echo "Rolling back to default settings..."
+    restore_history_files
+    remove_cron_job
+    remove_rc_local
+    make_files_mutable
+    echo "Default settings restored."
+}
+
+# ------------------------------
+# MAIN MENU
+# ------------------------------
+
 echo "Choose an option:"
 echo "1. Redirect history files to /dev/null"
 echo "2. Set up daily cron job to clear history"
-echo "3. Clear history on system startup (via /etc/rc.local)"
+echo "3. Clear history on system startup"
 echo "4. Make history files immutable"
-echo "5. Make history files mutable"
-echo "6. Perform all actions"
-echo "7. Exit"
+echo "5. Restore history logging"
+echo "6. Remove daily cron job"
+echo "7. Remove startup history clearing"
+echo "8. Make history files writable"
+echo "-------------------------------"
+echo "9. Enable all privacy settings"
+echo "10. Rollback to default settings"
+echo "11. Exit"
 read -p "Enter your choice: " CHOICE
 
 case $CHOICE in
-    1)
-        redirect_history_files
-        ;;
-    2)
-        setup_cron_job
-        ;;
-    3)
-        setup_rc_local
-        ;;
-    4)
-        make_files_immutable
-        ;;
-    5)
-        make_files_mutable
-        ;;
-    6)
-        redirect_history_files
-        setup_cron_job
-        setup_rc_local
-        make_files_immutable
-        ;;
-    7)
+    1) redirect_history_files ;;
+    2) setup_cron_job ;;
+    3) setup_rc_local ;;
+    4) make_files_immutable ;;
+    5) restore_history_files ;;
+    6) remove_cron_job ;;
+    7) remove_rc_local ;;
+    8) make_files_mutable ;;
+    9) enable_privacy ;;
+    10) rollback_to_default ;;
+    11)
         echo "Exiting..."
         exit 0
         ;;
